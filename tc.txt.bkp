@@ -1,0 +1,44 @@
+input {
+  jdbc {
+    jdbc_driver_library => "ifxjdbc.jar"
+    jdbc_driver_class => "com.informix.jdbc.IfxDriver"
+    schedule => "* * * * *"
+    statement => "select r.project_id challengeId, rr.name name, r.user_id userId, u.handle handle FROM resource r, resource_role_lu rr, user u WHERE r.resource_role_id = rr.resource_role_id AND r.user_id = u.user_id AND r.project_id = 30049004"
+  }
+}
+
+filter {
+  mutate {
+    rename => { "challengeid" => "challengeId" }
+  }
+  aggregate {
+    task_id => "_%{challengeId}"
+    code => "map['users'] ||= Array.new;
+             map[event['userid']] ||= Hash.new;
+             map[event['userid']]['id'] = event['userid'];
+             map[event['userid']]['handle'] = event['handle'];
+
+             if map[event['userid']]['roles']
+               map[event['userid']]['roles'].push(event['name']);
+             else
+               map[event['userid']]['roles'] = Array.new;
+               map[event['userid']]['roles'].push(event['name']);
+               map['users'].push(map[event['userid']]);
+             end
+             event['users'] = map['users'];"
+    timeout => 40
+    remove_field => ["@version", "@timestamp", "name", "userid", "handle"]
+  }
+}
+
+output {
+    elasticsearch {
+      hosts => localhost
+      index => challenges
+      document_type => challenge
+      document_id => "%{challengeId}"
+      action => "update"
+      doc_as_upsert => true
+    }
+    stdout { codec => rubydebug }
+}
